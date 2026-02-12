@@ -1,178 +1,68 @@
-# Système d'authentification PHP
+# Guide pour reconstruire le système de connexion
 
-Un système d'authentification complet, sécurisé et basique en PHP avec MySQL et PDO.
+Ce dépôt contient uniquement des points d'ancrage (TODO) qui t'aident à reconstituer toi-même le système d'authentification. Suis les étapes ci-dessous dans l'ordre et consulte la documentation liée pour chaque notion : tu apprendras mieux en cherchant les réponses dans les ressources officielles plutôt qu'en copiant-collant du code.
 
-## Fonctionnalités
+## Avant de commencer
 
-- ✅ Inscription utilisateur
-- ✅ Connexion / Déconnexion
-- ✅ Gestion des rôles (user / admin)
-- ✅ Pages protégées par authentification
-- ✅ Hachage sécurisé des mots de passe (bcrypt)
-- ✅ Protection contre les injections SQL (requêtes préparées PDO)
-- ✅ Sessions sécurisées avec régénération d'ID
-- ✅ Validation des données côté serveur
-- ✅ Protection CSRF de base
-- ✅ Interface responsive et moderne
+1. Installe un environnement PHP 8+ avec MySQL/MariaDB et un serveur web local (Apache ou Nginx). Guide : https://www.php.net/manual/fr/install.php
+2. Crée une base `auth_system` via `database.sql`. Tutoriel import SQL : https://dev.mysql.com/doc/refman/8.0/en/mysql-batch-commands.html
+3. Configure `config/database.php` avec tes identifiants (hôte, nom de base, utilisateur, mot de passe). Doc PDO : https://www.php.net/manual/fr/book.pdo.php
 
-## Structure des fichiers
+## Étape 1 — Sécuriser les sessions (`session.php`)
 
-```
-├── config/
-│   └── database.php          # Configuration de la base de données
-├── includes/
-│   └── session.php           # Gestion des sessions et authentification
-├── index.php                 # Page d'accueil
-├── signup.php                # Page d'inscription
-├── login.php                 # Page de connexion
-├── logout.php                # Script de déconnexion
-├── dashboard.php             # Page protégée pour tous les utilisateurs
-├── admin.php                 # Page protégée pour les admins uniquement
-└── database.sql              # Script de création de la base de données
-```
+Les TODO de `session.php` définissent la base de la sécurité. Utilise la doc des sessions (https://www.php.net/manual/fr/book.session.php) pour chacune des tâches suivantes :
+- Implémente `isLoggedIn()` en vérifiant la présence de `$_SESSION['user_id']` et `$_SESSION['username']` (« Variables superglobales » : https://www.php.net/manual/fr/language.variables.superglobals.php).
+- Complète `isAdmin()` en réutilisant `hasRole('admin')`.
+- Dans `requireLogin()`, protège toutes les pages : si `isLoggedIn()` est faux, redirige avec `header('Location: login.php'); exit;`. Rappel `header()` : https://www.php.net/manual/fr/function.header.php.
+- Dans `requireAdmin()`, commence par appeler `requireLogin()` puis vérifie `isAdmin()`. En cas d'échec, redirige vers `dashboard.php` et termine le script.
 
-## Installation
+## Étape 2 — Gérer l'inscription (`signup.php`)
 
-### 1. Prérequis
+Cette page contient plusieurs TODO dans la partie PHP **et** dans le formulaire HTML.
 
-- PHP 7.4 ou supérieur
-- MySQL 5.7 ou supérieur (ou MariaDB)
-- Serveur web (Apache, Nginx, etc.)
+1. **Récupérer les données du formulaire** : extrais `username`, `email`, `password`, `confirm_password` depuis `$_POST`. Doc : https://www.php.net/manual/fr/reserved.variables.post.php.
+2. **Valider les champs** :
+   - Vérifie qu'ils ne sont pas vides (`empty`).
+   - Contrôle la longueur du `username` (entre 3 et 50 caractères) et du `password` (>= 8). Fonctions utiles : `strlen`, `trim`.
+   - Valide l'email avec `filter_var($email, FILTER_VALIDATE_EMAIL)` (doc : https://www.php.net/manual/fr/function.filter-var.php).
+   - Confirme que les deux mots de passe sont identiques.
+3. **Vérifier l'unicité** :
+   - Prépare deux requêtes PDO `SELECT id FROM users WHERE username = ?` et `SELECT id FROM users WHERE email = ?` (doc requêtes préparées : https://www.php.net/manual/fr/pdo.prepared-statements.php).
+   - Utilise `fetch()` pour savoir si un enregistrement existe déjà. Si c'est le cas, ajoute un message d'erreur approprié.
+4. **Créer l'utilisateur** (si la liste d'erreurs est vide) :
+   - Hache le mot de passe avec `password_hash($password, PASSWORD_DEFAULT)` (doc : https://www.php.net/manual/fr/function.password-hash.php).
+   - Prépare une requête `INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, 'user')` et exécute-la avec les valeurs calculées.
+5. **Compléter le formulaire HTML** :
+   - Ajoute un champ `email` et un champ `password` en t'inspirant du pattern déjà présent pour `username`. Rappelle-toi de ré-afficher les anciennes valeurs (`$_POST`) via `htmlspecialchars` pour éviter les failles XSS (doc : https://www.php.net/manual/fr/function.htmlspecialchars.php).
 
-### 2. Configuration de la base de données
+## Étape 3 — Implémenter la connexion (`login.php`)
 
-Exécutez le script SQL pour créer la base de données et les tables :
+Le fichier décrit toutes les étapes à couvrir. Avance point par point :
+1. Démarre la session via `startSecureSession()` et redirige l'utilisateur déjà connecté vers `dashboard.php` à l'aide de `isLoggedIn()`.
+2. Lors d'un POST :
+   - Récupère `username` (ou email) et `password` depuis `$_POST`.
+   - Si l'un des champs est vide, ajoute l'erreur « Veuillez remplir tous les champs. »
+3. Si les champs sont valides, utilise PDO pour rechercher l'utilisateur :
+   - `SELECT id, username, password, role FROM users WHERE username = ? OR email = ?`
+   - Lie deux fois la même valeur (`$username`) afin de permettre la connexion par nom d'utilisateur **ou** email.
+   - Récupère la ligne avec `fetch(PDO::FETCH_ASSOC)`.
+4. Vérifie le mot de passe avec `password_verify()` (doc : https://www.php.net/manual/fr/function.password-verify.php). Si la vérification réussit :
+   - Appelle `session_regenerate_id(true)`.
+   - Stocke `$_SESSION['user_id']`, `$_SESSION['username']`, `$_SESSION['role']`.
+   - Redirige vers `dashboard.php`.
+5. En cas d'identifiant incorrect ou d'exception PDO, ajoute « Identifiants incorrects. » à `$errors` pour informer l'utilisateur.
 
-```sql
-mysql -u root -p < database.sql
-```
+## Étape 4 — Tester de bout en bout
 
-Ou importez manuellement le fichier `database.sql` via phpMyAdmin.
+1. Inscris deux profils (un utilisateur standard, un futur admin que tu pourras promouvoir directement en base si nécessaire).
+2. Vérifie que la connexion fonctionne et que `dashboard.php` n'est accessible qu'aux utilisateurs connectés (utilise `requireLogin()`).
+3. Force le rôle `admin` dans la base pour tester `requireAdmin()` depuis `admin.php`. La doc des privilèges MySQL t'aidera à modifier une ligne : https://dev.mysql.com/doc/refman/8.0/en/update.html.
+4. Termine en exécutant `logout.php` et vérifie que la session est détruite et qu'un nouvel ID est régénéré.
 
-### 3. Configuration de la connexion
+## Ressources utiles
 
-Modifiez le fichier `config/database.php` avec vos paramètres :
+- Sessions sécurisées : https://owasp.org/www-community/attacks/Session_fixation
+- PDO & gestion d'erreurs : https://www.php.net/manual/fr/pdo.error-handling.php
+- Validation côté serveur : https://www.php.net/manual/fr/filter.examples.validation.php
+- Sécurité des mots de passe : https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
 
-```php
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'auth_system');
-define('DB_USER', 'votre_utilisateur');
-define('DB_PASS', 'votre_mot_de_passe');
-```
-
-### 4. Créer des comptes de test
-
-Pour créer un compte admin et un compte utilisateur de test, exécutez ce script PHP :
-
-```php
-<?php
-require_once 'config/database.php';
-
-// Admin - Mot de passe: Admin123!
-$admin_password = password_hash('Admin123!', PASSWORD_DEFAULT);
-$stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)");
-$stmt->execute(['admin', 'admin@example.com', $admin_password, 'admin']);
-
-// User - Mot de passe: User123!
-$user_password = password_hash('User123!', PASSWORD_DEFAULT);
-$stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)");
-$stmt->execute(['testuser', 'user@example.com', $user_password, 'user']);
-
-echo "Comptes créés avec succès !";
-?>
-```
-
-### 5. Lancer l'application
-
-Placez les fichiers dans votre répertoire web et accédez à `index.php`.
-
-## Comptes de test
-
-Une fois les comptes créés :
-
-**Administrateur :**
-- Identifiant : `admin`
-- Mot de passe : `Admin123!`
-
-**Utilisateur :**
-- Identifiant : `testuser`
-- Mot de passe : `User123!`
-
-## Sécurité
-
-### Mesures implémentées
-
-1. **Hachage des mots de passe** : Utilisation de `password_hash()` avec bcrypt
-2. **Requêtes préparées** : Protection contre les injections SQL
-3. **Validation des entrées** : Validation côté serveur de tous les champs
-4. **Sessions sécurisées** :
-   - `session.cookie_httponly = 1` (protection XSS)
-   - `session.use_only_cookies = 1`
-   - Régénération d'ID de session après connexion
-5. **Échappement HTML** : Utilisation de `htmlspecialchars()` pour prévenir XSS
-6. **Vérification des rôles** : Contrôle d'accès basé sur les rôles
-
-### Recommandations pour la production
-
-Pour un environnement de production, ajoutez :
-
-1. **HTTPS** : Activer SSL/TLS et mettre `session.cookie_secure = 1`
-2. **Protection CSRF** : Implémenter des tokens CSRF pour les formulaires
-3. **Limitation des tentatives** : Ajouter un système de rate limiting
-4. **Logs de sécurité** : Logger les tentatives de connexion échouées
-5. **Variables d'environnement** : Stocker les credentials DB dans `.env`
-6. **Headers de sécurité** : Ajouter des headers HTTP de sécurité
-7. **Validation email** : Ajouter une vérification par email
-8. **Récupération de mot de passe** : Implémenter la fonctionnalité
-9. **2FA** : Ajouter l'authentification à deux facteurs (optionnel)
-
-## Usage
-
-### Pages publiques
-
-- `index.php` : Page d'accueil
-- `signup.php` : Inscription
-- `login.php` : Connexion
-
-### Pages protégées
-
-- `dashboard.php` : Accessible à tous les utilisateurs connectés
-- `admin.php` : Accessible uniquement aux administrateurs
-- `logout.php` : Déconnexion
-
-### Fonctions utiles (session.php)
-
-```php
-isLoggedIn()          // Vérifie si l'utilisateur est connecté
-hasRole($role)        // Vérifie si l'utilisateur a un rôle spécifique
-isAdmin()             // Vérifie si l'utilisateur est admin
-requireLogin()        // Force la connexion (redirige sinon)
-requireAdmin()        // Force le rôle admin (redirige sinon)
-logout()              // Déconnecte l'utilisateur
-```
-
-## Personnalisation
-
-### Ajouter un nouveau rôle
-
-1. Modifiez la table `users` pour ajouter le rôle dans l'ENUM
-2. Créez une fonction dans `session.php` similaire à `isAdmin()`
-3. Utilisez-la dans vos pages protégées
-
-### Créer une nouvelle page protégée
-
-```php
-<?php
-require_once 'config/database.php';
-require_once 'includes/session.php';
-
-startSecureSession();
-requireLogin(); // ou requireAdmin() pour admin uniquement
-
-// Votre code ici
-?>
-```
-
-## Licence
-
-Ce code est fourni à des fins éducatives. Libre d'utilisation et de modification.
